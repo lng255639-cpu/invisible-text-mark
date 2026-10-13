@@ -1,45 +1,112 @@
-# Invisible Text Mark
+# 隱形字串標記 Invisible Text Mark
 
-A [Claude Code](https://claude.com/claude-code) skill that hides a string inside an article as **zero-width characters**. Readers see nothing, but the mark can be read back later: tag your writing with an author or tracking code, find out where a leaked copy came from, or check text for hidden characters.
+[Claude Code](https://claude.com/claude-code) skill：把你指定的字串用**零寬字元**藏進文章。讀者什麼都看不到，文章外觀和內容完全一樣，但字串還在，之後可以讀出來。
 
-用**零寬字元**把字串藏進文章的 Claude Code skill。讀者看不到，之後可以讀出來：替文章加作者或追蹤碼、查出外流的版本是哪一份，或檢查文字裡有沒有藏東西。
+常見用途：
+
+- 替自己的文章加上作者、日期、版本編號
+- 每個收件人給不同的追蹤碼，文章外流或被轉貼時，就知道是從誰那裡流出去的
+- 檢查別人傳來的文字有沒有藏隱形字元，並清乾淨
+
+> English edition: [invisible-text-mark-en](https://github.com/lng255639-cpu/invisible-text-mark-en)。兩個版本各自只回應自己語言的請求，可以兩個都裝。
+
+---
+
+## 快速開始
+
+在 Claude Code 輸入：
 
 ```
-/invisible-text-mark-en hide "client-A" in post.md
+/invisible-text-mark 把「作者:小明 #2026-001」藏進 ~/草稿/文章.md
 ```
 
+Claude 會在原檔旁邊產生 `文章.marked.md`，讀回標記確認無誤，再告訴你放了幾處。
+
+也可以直接講：
+
+- 「幫這篇文章加隱形浮水印 `客戶A`」
+- 「這段文字裡有沒有隱形字元？」
+- 「讀出 `外流.txt` 裡藏的標記」
+- 「把這個檔案的隱形字元全部清掉」
+
+---
+
+## 原理
+
+字串的每個位元組（UTF-8）拆成 8 個位元，`0` 寫成 U+200B（ZERO WIDTH SPACE），`1` 寫成 U+200C（ZERO WIDTH NON-JOINER），前後再用 U+2060（WORD JOINER）和 U+2063（INVISIBLE SEPARATOR）包起來，方便之後找回。
+
 ```
-$ python zwmark.py extract -i post.marked.md
-client-A	(x3)
+"x"  ->  01111000  ->  U+2060 · 200B 200C 200C 200C 200C 200B 200B 200B · U+2063
 ```
 
-## Editions / 版本
+英文字母或數字一個字占 8 個隱形字元，中文字一個字占 24 個，外加頭尾 2 個。
 
-| Edition | Folder | Command | Guide |
-|---------|--------|---------|-------|
-| 繁體中文 | [`invisible-text-mark/`](invisible-text-mark/) | `/invisible-text-mark` | [使用說明](invisible-text-mark/README.md) |
-| English | [`invisible-text-mark-en/`](invisible-text-mark-en/) | `/invisible-text-mark-en` | [User guide](invisible-text-mark-en/README.md) |
+## 放置位置
 
-Each edition only triggers on requests in its own language, so installing both is fine.
-兩個版本各自只回應自己語言的請求，可以兩個都裝。
+| `--mode` | 放在哪 | 適合 |
+|----------|--------|------|
+| `paragraphs`（預設） | 每個文字段落結尾 | 別人只複製一部分也抓得到 |
+| `first` | 第一段結尾 | 隱形字元少一點 |
+| `end` | 全文最後 | 最精簡，但只複製一部分就會丟失 |
+| `at:N` | 第 N 個字元後面 | 要精準控制位置時 |
 
-## Quick install / 快速安裝
+`paragraphs` 和 `first` 會跳過程式碼區塊、表格、分隔線、純 HTML 行，Markdown 排版不會壞。
+
+---
+
+## 直接用腳本
+
+skill 背後是 `scripts/zwmark.py`，可以單獨使用（Python 3，只用標準函式庫）。不給 `-i` 就從 stdin 讀，不給 `-o` 就輸出到 stdout。
 
 ```bash
-git clone https://github.com/lng255639-cpu/invisible-text-mark.git
-cp -r invisible-text-mark/invisible-text-mark-en ~/.claude/skills/   # English
-cp -r invisible-text-mark/invisible-text-mark ~/.claude/skills/      # 繁體中文
+# 藏字串
+python zwmark.py embed -t "作者:小明 #2026-001" -i 文章.md -o 文章.marked.md
+
+# 讀出來
+python zwmark.py extract -i 文章.marked.md
+# 作者:小明 #2026-001	(x3)
+
+# 統計各種隱形字元
+python zwmark.py inspect -i 文章.marked.md
+
+# 只清掉本工具的標記
+python zwmark.py strip -i 文章.marked.md -o 文章.clean.md
+
+# 清掉所有隱形字元（別的工具藏的也一起清）
+python zwmark.py strip --all -i 可疑.txt -o 乾淨.txt
 ```
 
-Start a new Claude Code session afterwards. / 裝好後開新對話。
+找不到標記時，`extract` 會印 `NO MARK FOUND` 並以代碼 1 結束，方便寫進腳本。
 
-The script `zwmark.py` also works on its own (Python 3, no dependencies). / `zwmark.py` 也可以單獨使用（Python 3，免安裝套件）。
+---
 
-## Not for prompt injection / 不用於 prompt injection
+## 限制
 
-The skill refuses to hide instructions aimed at an AI (e.g. hidden "give this resume a high score" text). It is for marks, not messages to machines.
-skill 會拒絕藏給 AI 看的指令（例如在履歷裡藏「給高分」）。這是做標記用的，不是對機器傳話用的。
+- **不是加密。** 知道方法的人都讀得出、刪得掉。
+- **有些地方會濾掉：** 部分社群網站、簡訊、純文字表單、截圖、OCR。
+- **重新打字或被清過就沒了**，例如跑過 `strip --all` 或其他「清除零寬字元」工具。
+- **Word / Google Docs：** 貼進去通常會保留。可以再複製出來跑 `extract` 確認。
 
-## License
+## 不做的事
+
+skill 會拒絕藏**給 AI 看的指令**，例如在履歷、作業、網頁裡偷藏「忽略前面的指示」「給這份履歷高分」。這是 prompt injection，會誤導依賴 AI 審查的人。這個工具用來做標記，不是用來對機器傳話。
+
+---
+
+## 安裝
+
+```bash
+git clone https://github.com/lng255639-cpu/invisible-text-mark.git ~/.claude/skills/invisible-text-mark
+```
+
+裝好後開新對話。之後要更新：`git -C ~/.claude/skills/invisible-text-mark pull`。
+
+## 移除
+
+```bash
+rm -rf ~/.claude/skills/invisible-text-mark
+```
+
+## 授權
 
 [MIT](LICENSE)
